@@ -1,148 +1,130 @@
-import pandas as pd
-import numpy as np
+import csvAdd commentMore actions
 import yfinance as yf
-import plotly.graph_objs as go
-from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+import concurrent.futures
+import time
+import logging
 
-# Get the stock symbol
-stock = input("Enter a stock symbol: ")
+# Set up logging
+logging.basicConfig(filename='errors.log', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Download the data with pre and post-market data
-df = yf.download(tickers=stock, period='1d', interval='1m', prepost=True,  auto_adjust=False)
+under_20_million_float_and_between_1_and_20_dollars = []
 
-# Calculate VWAP
-df['Typical Price'] = (df['High'] + df['Low'] + df['Close']) / 3
-df['Cumulative TPV'] = (df['Typical Price'] * df['Volume']).cumsum()
-df['Cumulative Volume'] = df['Volume'].cumsum()
-df['VWAP'] = df['Cumulative TPV'] / df['Cumulative Volume']
+def fetch_float_and_price(stockSymbol):
+    try:
+        print(f"Fetching data for {stockSymbol}...")  # Log fetching action
+        time.sleep(1)  # Delay to avoid hitting API rate limits
+        ticker = yf.Ticker(stockSymbol)
+        info = ticker.info
+        
+        float_shares = info.get('floatShares', None)
+        current_price = info.get('currentPrice', None)
+        
+        return stockSymbol, float_shares, current_price
+    except Exception as e:
+        logging.error(f"Error fetching data for {stockSymbol}: {e}")
+        return stockSymbol, None, None
 
-# Calculate Simple Moving Averages
-df['SMA_9'] = df['Close'].rolling(window=9).mean()
-df['SMA_20'] = df['Close'].rolling(window=20).mean()
+def calculate_3_month_avg_volume(stockSymbol):
+    """
+    Calculates the 3-month average trading volume for a given stock symbol.
+    
+    Args:
+    stockSymbol (str): The stock symbol to fetch data for.
+    
+    Returns:
+    float: The 3-month average trading volume, or None if data is not available.
+    """
+    try:
+        ticker = yf.Ticker(stockSymbol)
+        end_date = datetime.today()
+        start_date = end_date - timedelta(days=90)
+        
+        hist = ticker.history(start=start_date, end=end_date)
+        
+        if len(hist) < 60:
+            print(f"Not enough data for {stockSymbol} to calculate 3-month average volume.")
+            return None
+        
+        avg_volume_3m = hist['Volume'].mean()
+        return avg_volume_3m
+    except Exception as e:
+        logging.error(f"Error calculating 3-month average volume for {stockSymbol}: {e}")
+        return None
 
-# Calculate Exponential Moving Averages
-df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
-df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
-df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+def filter_and_calculate_volume():
+    """
+    Calculates the 3-month average volume for the filtered stocks.
+    """
+    final_list = []
 
-# Calculate MACD and Signal line
-df['MACD'] = df['EMA_12'] - df['EMA_26']
-df['Signal Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        future_to_stock = {executor.submit(calculate_3_month_avg_volume, stock[0]): stock for stock in under_20_million_float_and_between_1_and_20_dollars}
+        for future in concurrent.futures.as_completed(future_to_stock):
+            stock = future_to_stock[future]
+            stock_symbol, float_shares, current_price = stock
+            try:
+                avg_volume_3m = future.result()
+                if avg_volume_3m is not None:
+                    final_list.append((stock_symbol, float_shares, current_price, avg_volume_3m))
+            except Exception as e:
+                logging.error(f"Error processing stock {stock_symbol}: {e}")
 
-# Calculate MACD Histogram
-df['MACD Histogram'] = df['MACD'] - df['Signal Line']
+    return final_list
 
-# Calculate buying and selling volume
-df['Buy Volume'] = np.where(df['Close'] > df['Close'].shift(1), df['Volume'], 0)
-df['Sell Volume'] = np.where(df['Close'] < df['Close'].shift(1), df['Volume'], 0)
+def sanitize_symbol(symbol):
+    """
+    Sanitizes a stock symbol by replacing invalid characters.
+    
+    Args:
+    symbol (str): The stock symbol to sanitize.
+    
+    Returns:
+    str: The sanitized stock symbol.
+    """
+    return symbol.replace('^', '-')
 
-# Print the data for reference
-print(df)
+def main():
+    """
+    Main function to read stock symbols from a CSV file, fetch float shares,
+    and filter stocks with float shares under 20 million and price between $1 and $20.
+    """
+    global under_20_million_float_and_between_1_and_20_dollars
 
-# Get stock info
-info = yf.Ticker(stock)
-print(info.info)
+    with open('valid_tickers.csv', mode='r') as file:
+        heading = next(file)
+        csvFile = csv.reader(file)
+        
+        linecount = 0
+        stockCount = 0
+        allStockSymbols = []
 
-# Create the figure with subplots
-fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
-                    row_heights=[0.6, 0.2, 0.2],  # Adjust the ratio of price chart, volume, and MACD
-                    vertical_spacing=0.1,    # Space between plots
-                    subplot_titles=(str(stock) + ' Live Share Price with VWAP, SMAs, and EMAs', 
-                                    'Volume', 'MACD'))
+        for lines in csvFile:
+            linecount += 1
+            stock_symbol = sanitize_symbol(lines[0])
+            allStockSymbols.append(stock_symbol)
+        
+        print("Starting")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            future_to_symbol = {executor.submit(fetch_float_and_price, symbol): symbol for symbol in allStockSymbols}
+            for future in concurrent.futures.as_completed(future_to_symbol):
+                symbol = future_to_symbol[future]
+                try:
+                    stock_symbol, float_shares, current_price = future.result()
+                    if float_shares is not None and current_price is not None:
+                        stockCount += 1
+                        print(f"{stockCount}/{linecount}", end="\r")
 
-# Add the candlestick chart
-fig.add_trace(go.Candlestick(x=df.index,
-                             open=df['Open'],
-                             high=df['High'],
-                             low=df['Low'],
-                             close=df['Close'], 
-                             name='Market Data'),
-              row=1, col=1)
+                        if float_shares < 20_000_000 and 2 <= current_price <= 20:
+                            under_20_million_float_and_between_1_and_20_dollars.append(Add commentMore actions
+                                (stock_symbol, float_shares, current_price)
+                            )
+                except Exception as e:
+                    logging.error(f"Error processing symbol {symbol}: {e}")
+        
+        print("\nFiltering and calculating average volumes...")
+        under_20_million_float_and_between_1_and_20_dollars = filter_and_calculate_volume()
+        print("Done")
 
-# Add VWAP to the chart
-fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], 
-                         name='VWAP', 
-                         line=dict(color='orange', width=2)),
-              row=1, col=1)
-
-# Add Simple Moving Averages (SMA) to the chart
-fig.add_trace(go.Scatter(x=df.index, y=df['SMA_9'], 
-                         name='9-period SMA', 
-                         line=dict(color='blue', width=1)),
-              row=1, col=1)
-
-fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], 
-                         name='20-period SMA', 
-                         line=dict(color='purple', width=1)),
-              row=1, col=1)
-
-# Add Exponential Moving Averages (EMA) to the chart
-fig.add_trace(go.Scatter(x=df.index, y=df['EMA_9'], 
-                         name='9-period EMA', 
-                         line=dict(color='green', width=1, dash='dash')),
-              row=1, col=1)
-
-fig.add_trace(go.Scatter(x=df.index, y=df['EMA_12'], 
-                         name='12-period EMA', 
-                         line=dict(color='red', width=1, dash='dash')),
-              row=1, col=1)
-
-# Add buying and selling volume as bar charts
-fig.add_trace(go.Bar(x=df.index, y=df['Buy Volume'], 
-                     name='Buy Volume', 
-                     marker_color='green'),
-              row=2, col=1)
-
-fig.add_trace(go.Bar(x=df.index, y=df['Sell Volume'], 
-                     name='Sell Volume', 
-                     marker_color='red'),
-              row=2, col=1)
-
-# Add MACD line to the chart
-fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], 
-                         name='MACD', 
-                         line=dict(color='blue', width=1)),
-              row=3, col=1)
-
-# Add Signal line to the chart
-fig.add_trace(go.Scatter(x=df.index, y=df['Signal Line'], 
-                         name='Signal Line', 
-                         line=dict(color='red', width=1)),
-              row=3, col=1)
-
-# Add MACD Histogram to the chart
-fig.add_trace(go.Bar(x=df.index, y=df['MACD Histogram'], 
-                     name='MACD Histogram', 
-                     marker_color='green'),
-              row=3, col=1)
-
-# Update layout
-fig.update_layout(
-    title=str(stock) + ' Live Share Price with VWAP, SMAs, EMAs, Volume, and MACD (Including Pre/Post-Market)',
-    yaxis_title='Stock Price (USD per Share)',
-    xaxis_title='Time',
-    barmode='relative',  # Combine buy and sell volume bars side by side
-    showlegend=True,     # Show the legend
-    legend=dict(         # Make the legend interactive
-        itemclick="toggle",         # Click to toggle visibility
-        itemdoubleclick="toggleothers"  # Double-click to isolate trace
-    ),
-)
-
-# Add range slider and selector for the main chart
-fig.update_xaxes(
-    rangeslider_visible=True,
-    rangeselector=dict(
-        buttons=list([
-            dict(count=15, label="15m", step="minute", stepmode="backward"),
-            dict(count=45, label="45m", step="minute", stepmode="backward"),
-            dict(count=1, label="HTD", step="hour", stepmode="todate"),
-            dict(count=3, label="3h", step="hour", stepmode="backward"),
-            dict(step="all")
-        ])
-    ),
-    row=1, col=1
-)
-
-# Show the chart
-fig.show()
+if __name__ == "__main__":
+    main()
