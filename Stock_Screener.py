@@ -8,7 +8,7 @@ from plotly.subplots import make_subplots
 stock = input("Enter a stock symbol: ")
 
 # Download the data with pre and post-market data
-df = yf.download(tickers=stock, period='1d', interval='1m', prepost=True)
+df = yf.download(tickers=stock, period='1d', interval='1m', prepost=True,  auto_adjust=False)
 
 # Calculate VWAP
 df['Typical Price'] = (df['High'] + df['Low'] + df['Close']) / 3
