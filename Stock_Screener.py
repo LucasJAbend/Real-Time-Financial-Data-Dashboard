@@ -55,7 +55,7 @@ def calculate_3_month_avg_volume(stockSymbol):
 def filter_and_calculate_volume(filtered_stocks):
     final_list = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = {
             executor.submit(calculate_3_month_avg_volume, symbol): (symbol, float_shares, price)
             for symbol, float_shares, price in filtered_stocks
@@ -87,7 +87,7 @@ def main():
                 all_symbols.append(sanitize_symbol(line[0]))
 
     print("Fetching float and price data...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(fetch_float_and_price, symbol): symbol for symbol in all_symbols}
         for i, future in enumerate(concurrent.futures.as_completed(futures), 1):
             symbol = futures[future]

@@ -1,4 +1,5 @@
 import pandas as pd
+import pytz
 import numpy as np
 import yfinance as yf
 import plotly.graph_objs as go
@@ -10,6 +11,7 @@ stock = input("Enter a stock symbol: ").upper()
 # Download the data with pre and post-market data
 df = yf.download(tickers=stock, period='1d', interval='1m', prepost=True)
 
+df.index = df.index.tz_convert('US/Eastern')
 # Flatten MultiIndex columns
 df.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in df.columns.values]
 
