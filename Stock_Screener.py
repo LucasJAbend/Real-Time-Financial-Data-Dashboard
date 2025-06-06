@@ -5,6 +5,15 @@ import concurrent.futures
 import time
 import logging
 
+try:
+    from curl_cffi import requests as curl_requests
+    session = curl_requests.Session(impersonate="chrome")
+    print("Using curl_cffi session with Chrome impersonation.")
+except ImportError:
+    import requests
+    session = requests.Session()
+    print("Using standard requests session (curl_cffi not found).")
+
 # Set up logging
 logging.basicConfig(
     filename='errors.log',
@@ -16,7 +25,7 @@ def fetch_float_and_price(stockSymbol):
     try:
         print(f"Fetching data for {stockSymbol}...")
         time.sleep(1)  # To respect API rate limits
-        ticker = yf.Ticker(stockSymbol)
+        ticker = yf.Ticker(stockSymbol, session=session)
         info = ticker.info
 
         float_shares = info.get('floatShares')
@@ -29,7 +38,7 @@ def fetch_float_and_price(stockSymbol):
 
 def calculate_3_month_avg_volume(stockSymbol):
     try:
-        ticker = yf.Ticker(stockSymbol)
+        ticker = yf.Ticker(stockSymbol, session=session)
         end_date = datetime.today()
         start_date = end_date - timedelta(days=90)
         hist = ticker.history(start=start_date, end=end_date)
