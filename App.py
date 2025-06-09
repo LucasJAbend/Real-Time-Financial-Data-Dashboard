@@ -6,6 +6,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 from dash import dcc, html
 import dash
+import concurrent.futures
 from dash.dependencies import Input, Output
 import dash_bootstrap_components as dbc
 from flask import Flask, jsonify
@@ -15,6 +16,16 @@ import threading
 
 # Create a Flask server for the Dash app
 server = Flask(__name__)
+
+try:
+    from curl_cffi import requests as curl_requests
+    session = curl_requests.Session(impersonate="chrome")
+    print("Using curl_cffi session with Chrome impersonation.")
+except ImportError:
+    import requests
+    session = requests.Session()
+    print("Using standard requests session (curl_cffi not found).")
+
 
 # Function to fetch stock data using yfinance
 def fetch_stock_data(stockSymbol):
